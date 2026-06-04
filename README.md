@@ -1,4 +1,4 @@
-# WorkPCUtilities
+# Work PC Utilities
 
 A portable, single-file PowerShell 5.1 desktop utility for corporate Windows workstations.  
 Keeps Citrix sessions alive, shows dual-timezone clocks, and manages TOTP 2FA codes — all in one lightweight WPF window with light/dark theme support.
