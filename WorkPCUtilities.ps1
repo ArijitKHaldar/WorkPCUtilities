@@ -37,7 +37,7 @@ public static class NativeMethods
     public static extern void keybd_event(byte bVk, byte bScan, int dwFlags, int extraInfo);
 
     [DllImport("kernel32.dll")]
-    public static extern uint SetThreadExecutionState(uint esFlags);
+    public static extern int SetThreadExecutionState(int esFlags);
 }
 '@
 
@@ -107,8 +107,8 @@ function Get-DefaultSettings {
         ThemeMode            = 'System'
         LocalClockZoneId     = $localZone
         ClientClockZoneId     = $clientZone
-        WindowWidth          = 1280
-        WindowHeight         = 860
+        WindowWidth          = 960
+        WindowHeight         = 680
         WindowLeft           = $null
         WindowTop            = $null
         WindowState          = 'Normal'
@@ -338,6 +338,13 @@ function Apply-MainWindowThemeSurface {
             $element.BorderBrush = $border
         }
     }
+
+    $themeCombo = $window.FindName('ThemeCombo')
+    if ($themeCombo) {
+        $themeCombo.Background  = Get-ThemeResource -Key 'InputBackgroundBrush'
+        $themeCombo.Foreground  = Get-ThemeResource -Key 'TextBrush'
+        $themeCombo.BorderBrush = Get-ThemeResource -Key 'InputBorderBrush'
+    }
 }
 
 function Apply-MutedTextBrushes {
@@ -352,6 +359,19 @@ function Apply-MutedTextBrushes {
         if ($element) {
             $element.Foreground = $muted
         }
+    }
+}
+
+function Set-AppStatusText {
+    param([Parameter(Mandatory = $true)][string]$Text)
+
+    if (-not $script:MainWindow) {
+        return
+    }
+
+    $statusText = $script:MainWindow.FindName('AppStatusText')
+    if ($statusText) {
+        $statusText.Text = $Text
     }
 }
 
@@ -374,7 +394,7 @@ function Build-ThemeStyles {
                             Background="{TemplateBinding Background}"
                             BorderBrush="{TemplateBinding BorderBrush}"
                             BorderThickness="{TemplateBinding BorderThickness}"
-                            CornerRadius="12,12,0,0"
+                            CornerRadius="12"
                             Padding="{TemplateBinding Padding}">
                         <ContentPresenter ContentSource="Header"
                                           HorizontalAlignment="Center"
@@ -1069,7 +1089,7 @@ function Parse-TotpInput {
         [Parameter(Mandatory = $true)][string]$Name,
         [Parameter(Mandatory = $true)][string]$Issuer,
         [Parameter(Mandatory = $true)][string]$SecretOrUri,
-        [Parameter(Mandatory = $true)][string]$ExistingSecret
+        [AllowEmptyString()][string]$ExistingSecret = ''
     )
 
     $nameValue = $Name.Trim()
@@ -1409,15 +1429,14 @@ function Show-TotpDetailDialog {
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="TOTP"
         Width="520"
-        Height="360"
         MinWidth="480"
-        MinHeight="320"
+        SizeToContent="Height"
         WindowStartupLocation="CenterOwner"
         ResizeMode="CanResize">
     <Grid Margin="20">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
-            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
@@ -1431,11 +1450,11 @@ function Show-TotpDetailDialog {
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
                 <StackPanel>
-                    <TextBlock x:Name="EntryName" FontSize="22" FontWeight="SemiBold" />
+                    <TextBlock x:Name="EntryName" FontSize="22" FontWeight="SemiBold" TextWrapping="Wrap" />
                     <TextBlock x:Name="EntryIssuer" Margin="0,4,0,0" TextWrapping="Wrap" />
                 </StackPanel>
-                <StackPanel Grid.Column="1" HorizontalAlignment="Right">
-                    <Button x:Name="CopyButton" Content="Copy code" Style="{StaticResource PrimaryButtonStyle}" Margin="0,0,0,0" />
+                <StackPanel Grid.Column="1" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="12,0,0,0">
+                    <Button x:Name="CopyButton" Content="Copy code" Style="{StaticResource PrimaryButtonStyle}" Margin="0" />
                 </StackPanel>
             </Grid>
         </Border>
@@ -1445,11 +1464,16 @@ function Show-TotpDetailDialog {
                 Margin="0,14,0,14"
                 BorderThickness="1"
                 CornerRadius="18"
-                Padding="18">
-            <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
-                <TextBlock x:Name="CodeText" FontFamily="Consolas" FontSize="48" FontWeight="Bold" HorizontalAlignment="Center" />
+                Padding="24,20">
+            <StackPanel>
+                <TextBlock x:Name="CodeText" FontFamily="Consolas" FontSize="48" FontWeight="Bold"
+                           HorizontalAlignment="Center" TextWrapping="Wrap" />
+                <!-- Expiry bar: track + fill Border sized in code -->
+                <Grid x:Name="ExpiryTrack" Height="10" Margin="0,16,0,0" Background="#22808080">
+                    <Border x:Name="ExpiryFill" HorizontalAlignment="Left" Width="0" CornerRadius="4,0,0,4" />
+                </Grid>
                 <TextBlock x:Name="RemainingText" Margin="0,8,0,0" HorizontalAlignment="Center" />
-                <TextBlock x:Name="MetaText" Margin="0,12,0,0" HorizontalAlignment="Center" />
+                <TextBlock x:Name="MetaText" Margin="0,10,0,0" HorizontalAlignment="Center" TextWrapping="Wrap" />
             </StackPanel>
         </Border>
 
@@ -1475,28 +1499,42 @@ function Show-TotpDetailDialog {
     }
     Apply-MutedTextBrushes -Window $window -Names @('EntryIssuer', 'RemainingText', 'MetaText')
 
-    $entryName = $window.FindName('EntryName')
-    $entryIssuer = $window.FindName('EntryIssuer')
-    $codeText = $window.FindName('CodeText')
+    $entryName     = $window.FindName('EntryName')
+    $entryIssuer   = $window.FindName('EntryIssuer')
+    $codeText      = $window.FindName('CodeText')
     $remainingText = $window.FindName('RemainingText')
-    $metaText = $window.FindName('MetaText')
-    $copyButton = $window.FindName('CopyButton')
-    $closeButton = $window.FindName('CloseButton')
+    $metaText      = $window.FindName('MetaText')
+    $expiryTrack   = $window.FindName('ExpiryTrack')
+    $expiryFill    = $window.FindName('ExpiryFill')
+    $copyButton    = $window.FindName('CopyButton')
+    $closeButton   = $window.FindName('CloseButton')
 
-    $entryName.Text = $Entry.DisplayName
+    $entryName.Text   = $Entry.DisplayName
     $entryIssuer.Text = if ([string]::IsNullOrWhiteSpace($Entry.Issuer)) { 'No issuer provided' } else { $Entry.Issuer }
 
     $refresh = {
         try {
             $snapshot = Get-TotpSnapshot -Entry $Entry
-            $codeText.Text = $snapshot.CodeDisplay
+            $codeText.Text      = $snapshot.CodeDisplay
             $remainingText.Text = 'Valid for {0}s' -f $snapshot.RemainingSeconds
-            $metaText.Text = 'Period: {0}s   Digits: {1}   Algorithm: {2}' -f $Entry.Period, $Entry.Digits, $Entry.Algorithm
+            $metaText.Text      = 'Period: {0}s   Digits: {1}   Algorithm: {2}' -f $Entry.Period, $Entry.Digits, $Entry.Algorithm
+
+            if ($expiryFill -and $expiryTrack -and $expiryTrack.ActualWidth -gt 0) {
+                $pct = [double]$snapshot.RemainingSeconds / [double]$Entry.Period
+                $expiryFill.Width = $expiryTrack.ActualWidth * $pct
+                $expiryFill.Background = if ($pct -gt 0.66) {
+                    New-Brush 52 211 153    # green
+                } elseif ($pct -gt 0.33) {
+                    New-Brush 251 191 36    # yellow
+                } else {
+                    New-Brush 248 113 113   # red
+                }
+            }
         }
         catch {
-            $codeText.Text = 'ERR'
+            $codeText.Text      = 'ERR'
             $remainingText.Text = 'Unable to calculate code.'
-            $metaText.Text = $_.Exception.Message
+            $metaText.Text      = $_.Exception.Message
         }
     }
 
@@ -1513,7 +1551,9 @@ function Show-TotpDetailDialog {
     $timer.Interval = [TimeSpan]::FromSeconds(1)
     $timer.Add_Tick($refresh)
     $timer.Start()
-    & $refresh
+
+    # Run once after layout so ActualWidth is available
+    $window.Add_ContentRendered($refresh)
 
     $window.Add_Closed({
         $timer.Stop()
@@ -1715,10 +1755,10 @@ function Initialize-Ui {
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="WorkPCUtilities"
-        Width="1280"
-        Height="860"
-        MinWidth="980"
-        MinHeight="680"
+        Width="960"
+        Height="680"
+        MinWidth="760"
+        MinHeight="560"
         WindowStartupLocation="CenterScreen"
         ResizeMode="CanResize"
         SnapsToDevicePixels="True"
@@ -1977,60 +2017,65 @@ function Initialize-Ui {
 
     $themeCombo.Add_SelectionChanged({
         if ($script:IsLoadingUi) { return }
-        $selected = [string]$themeCombo.SelectedItem
+        $_combo = $script:MainWindow.FindName('ThemeCombo')
+        $selected = if ($_combo) { [string]$_combo.SelectedItem } else { 'System' }
         if ([string]::IsNullOrWhiteSpace($selected)) { $selected = 'System' }
         $script:Settings.ThemeMode = $selected
         Save-Settings -Settings $script:Settings
         Set-AppTheme -ThemeMode $selected
         Set-CaffeinateUiState -Running $script:CaffeinateRunning
         Update-ClockDisplays -Settings $script:Settings
-        $appStatusText.Text = 'Theme updated to {0}.' -f $selected
+        Set-AppStatusText -Text ('Theme updated to {0}.' -f $selected)
     })
 
     $localZoneCombo.Add_SelectionChanged({
         if ($script:IsLoadingUi) { return }
-        $script:Settings.LocalClockZoneId = [string]$localZoneCombo.SelectedValue
+        $_combo = $script:MainWindow.FindName('LocalZoneCombo')
+        if ($_combo) { $script:Settings.LocalClockZoneId = [string]$_combo.SelectedValue }
         Save-Settings -Settings $script:Settings
         Update-ClockDisplays -Settings $script:Settings
     })
 
     $clientZoneCombo.Add_SelectionChanged({
         if ($script:IsLoadingUi) { return }
-        $script:Settings.ClientClockZoneId = [string]$clientZoneCombo.SelectedValue
+        $_combo = $script:MainWindow.FindName('ClientZoneCombo')
+        if ($_combo) { $script:Settings.ClientClockZoneId = [string]$_combo.SelectedValue }
         Save-Settings -Settings $script:Settings
         Update-ClockDisplays -Settings $script:Settings
     })
 
     $startKeepAliveButton.Add_Click({
         Start-Caffeinate
-        $appStatusText.Text = 'Keepalive started.'
+        Set-AppStatusText -Text 'Keepalive started.'
     })
 
     $stopKeepAliveButton.Add_Click({
         Stop-Caffeinate
-        $appStatusText.Text = 'Keepalive stopped.'
+        Set-AppStatusText -Text 'Keepalive stopped.'
     })
 
     $addTotpButton.Add_Click({
-        $entry = Show-TotpEditorDialog -Owner $window
+        $entry = Show-TotpEditorDialog -Owner $script:MainWindow
         if ($entry) {
             $newItem = New-TotpItem -Data $entry
             $script:VaultItems.Add($newItem)
             Save-VaultItems -Items $script:VaultItems
             Update-TotpSnapshots
-            $totpGrid.SelectedItem = $newItem
-            $appStatusText.Text = 'TOTP entry added.'
+            $_grid = $script:MainWindow.FindName('TotpGrid')
+            if ($_grid) { $_grid.SelectedItem = $newItem }
+            Set-AppStatusText -Text 'TOTP entry added.'
         }
     })
 
     $editTotpButton.Add_Click({
-        $selected = $totpGrid.SelectedItem
+        $_grid = $script:MainWindow.FindName('TotpGrid')
+        $selected = if ($_grid) { $_grid.SelectedItem } else { $null }
         if (-not $selected) {
             Show-Message -Text 'Choose a TOTP entry first.' -Caption 'Edit entry' -Icon Warning
             return
         }
 
-        $edited = Show-TotpEditorDialog -Entry $selected -Owner $window
+        $edited = Show-TotpEditorDialog -Entry $selected -Owner $script:MainWindow
         if ($edited) {
             $selected.Name = $edited.Name
             $selected.Issuer = $edited.Issuer
@@ -2042,12 +2087,13 @@ function Initialize-Ui {
             $selected.DisplayName = if (-not [string]::IsNullOrWhiteSpace($selected.Issuer)) { '{0} - {1}' -f $selected.Issuer, $selected.Name } else { $selected.Name }
             Save-VaultItems -Items $script:VaultItems
             Update-TotpSnapshots
-            $appStatusText.Text = 'TOTP entry updated.'
+            Set-AppStatusText -Text 'TOTP entry updated.'
         }
     })
 
     $deleteTotpButton.Add_Click({
-        $selected = $totpGrid.SelectedItem
+        $_grid = $script:MainWindow.FindName('TotpGrid')
+        $selected = if ($_grid) { $_grid.SelectedItem } else { $null }
         if (-not $selected) {
             Show-Message -Text 'Choose a TOTP entry first.' -Caption 'Delete entry' -Icon Warning
             return
@@ -2057,21 +2103,23 @@ function Initialize-Ui {
             $null = $script:VaultItems.Remove($selected)
             Save-VaultItems -Items $script:VaultItems
             Update-TotpSnapshots
-            $appStatusText.Text = 'TOTP entry deleted.'
+            Set-AppStatusText -Text 'TOTP entry deleted.'
         }
     })
 
     $viewTotpButton.Add_Click({
-        $selected = $totpGrid.SelectedItem
+        $_grid = $script:MainWindow.FindName('TotpGrid')
+        $selected = if ($_grid) { $_grid.SelectedItem } else { $null }
         if (-not $selected) {
             Show-Message -Text 'Choose a TOTP entry first.' -Caption 'View TOTP' -Icon Warning
             return
         }
-        Show-TotpDetailDialog -Entry $selected -Owner $window
+        Show-TotpDetailDialog -Entry $selected -Owner $script:MainWindow
     })
 
     $copyTotpButton.Add_Click({
-        $selected = $totpGrid.SelectedItem
+        $_grid = $script:MainWindow.FindName('TotpGrid')
+        $selected = if ($_grid) { $_grid.SelectedItem } else { $null }
         if (-not $selected) {
             Show-Message -Text 'Choose a TOTP entry first.' -Caption 'Copy TOTP' -Icon Warning
             return
@@ -2087,18 +2135,19 @@ function Initialize-Ui {
     })
 
     $viewAllTotpButton.Add_Click({
-        Show-AllTotpDialog -Owner $window
+        Show-AllTotpDialog -Owner $script:MainWindow
     })
 
     $refreshTotpButton.Add_Click({
         Update-TotpSnapshots
-        $appStatusText.Text = 'TOTP view refreshed.'
+        Set-AppStatusText -Text 'TOTP view refreshed.'
     })
 
     $totpGrid.Add_MouseDoubleClick({
-        $selected = $totpGrid.SelectedItem
+        $_grid = $script:MainWindow.FindName('TotpGrid')
+        $selected = if ($_grid) { $_grid.SelectedItem } else { $null }
         if ($selected) {
-            Show-TotpDetailDialog -Entry $selected -Owner $window
+            Show-TotpDetailDialog -Entry $selected -Owner $script:MainWindow
         }
     })
 
@@ -2116,24 +2165,30 @@ function Initialize-Ui {
                 Stop-Caffeinate
             }
 
-            $script:Settings.ThemeMode = [string]$themeCombo.SelectedItem
-            $script:Settings.LocalClockZoneId = [string]$localZoneCombo.SelectedValue
-            $script:Settings.ClientClockZoneId = [string]$clientZoneCombo.SelectedValue
-            $script:Settings.SelectedTabIndex = [int]$mainTabs.SelectedIndex
+            $_win = $script:MainWindow
+            $_themeCombo = $_win.FindName('ThemeCombo')
+            $_localCombo  = $_win.FindName('LocalZoneCombo')
+            $_clientCombo = $_win.FindName('ClientZoneCombo')
+            $_tabs         = $_win.FindName('MainTabs')
 
-            if ($window.WindowState -eq [System.Windows.WindowState]::Normal) {
-                $script:Settings.WindowWidth = [int][math]::Round($window.Width)
-                $script:Settings.WindowHeight = [int][math]::Round($window.Height)
-                $script:Settings.WindowLeft = [int][math]::Round($window.Left)
-                $script:Settings.WindowTop = [int][math]::Round($window.Top)
-                $script:Settings.WindowState = 'Normal'
+            if ($_themeCombo)  { $script:Settings.ThemeMode         = [string]$_themeCombo.SelectedItem  }
+            if ($_localCombo)  { $script:Settings.LocalClockZoneId  = [string]$_localCombo.SelectedValue  }
+            if ($_clientCombo) { $script:Settings.ClientClockZoneId = [string]$_clientCombo.SelectedValue }
+            if ($_tabs)        { $script:Settings.SelectedTabIndex  = [int]$_tabs.SelectedIndex           }
+
+            if ($_win.WindowState -eq [System.Windows.WindowState]::Normal) {
+                $script:Settings.WindowWidth  = [int][math]::Round($_win.Width)
+                $script:Settings.WindowHeight = [int][math]::Round($_win.Height)
+                $script:Settings.WindowLeft   = [int][math]::Round($_win.Left)
+                $script:Settings.WindowTop    = [int][math]::Round($_win.Top)
+                $script:Settings.WindowState  = 'Normal'
             }
             else {
-                if ($window.WindowState -eq [System.Windows.WindowState]::Minimized) {
+                if ($_win.WindowState -eq [System.Windows.WindowState]::Minimized) {
                     $script:Settings.WindowState = 'Normal'
                 }
                 else {
-                    $script:Settings.WindowState = [string]$window.WindowState
+                    $script:Settings.WindowState = [string]$_win.WindowState
                 }
             }
 
@@ -2146,11 +2201,31 @@ function Initialize-Ui {
     })
 
     $window.Add_ContentRendered({
-        if ($window.WindowState -eq [System.Windows.WindowState]::Normal) {
-            $window.Width = [double]$script:Settings.WindowWidth
-            $window.Height = [double]$script:Settings.WindowHeight
-            if ($null -ne $script:Settings.WindowLeft) { $window.Left = [double]$script:Settings.WindowLeft }
-            if ($null -ne $script:Settings.WindowTop) { $window.Top = [double]$script:Settings.WindowTop }
+        $_win = $script:MainWindow
+        if ($_win.WindowState -eq [System.Windows.WindowState]::Normal) {
+            $sw = [System.Windows.SystemParameters]::PrimaryScreenWidth
+            $sh = [System.Windows.SystemParameters]::PrimaryScreenHeight
+            $w  = [double]$script:Settings.WindowWidth
+            $h  = [double]$script:Settings.WindowHeight
+            # Clamp size to screen
+            if ($w -gt $sw) { $w = $sw }
+            if ($h -gt $sh) { $h = $sh }
+            $_win.Width  = $w
+            $_win.Height = $h
+            if ($null -ne $script:Settings.WindowLeft) {
+                $l = [double]$script:Settings.WindowLeft
+                # Keep window fully on screen horizontally
+                if ($l + $w -gt $sw) { $l = $sw - $w }
+                if ($l -lt 0) { $l = 0 }
+                $_win.Left = $l
+            }
+            if ($null -ne $script:Settings.WindowTop) {
+                $t = [double]$script:Settings.WindowTop
+                # Keep title bar reachable (at least 40px from top)
+                if ($t -lt 0) { $t = 0 }
+                if ($t + 40 -gt $sh) { $t = $sh - 40 }
+                $_win.Top = $t
+            }
         }
         if ($script:Settings.WindowState -and $script:Settings.WindowState -ne 'Normal') {
             try {
@@ -2158,10 +2233,10 @@ function Initialize-Ui {
                 if ($restoredState -eq [System.Windows.WindowState]::Minimized) {
                     $restoredState = [System.Windows.WindowState]::Normal
                 }
-                $window.WindowState = $restoredState
+                $_win.WindowState = $restoredState
             }
             catch {
-                $window.WindowState = [System.Windows.WindowState]::Normal
+                $_win.WindowState = [System.Windows.WindowState]::Normal
             }
         }
     })
@@ -2170,7 +2245,7 @@ function Initialize-Ui {
     Set-CaffeinateUiState -Running $false
     Update-ClockDisplays -Settings $Settings
     Update-TotpSnapshots
-    $appStatusText.Text = 'Ready.'
+    Set-AppStatusText -Text 'Ready.'
 
     $script:ClockTimer = New-Object System.Windows.Threading.DispatcherTimer
     $script:ClockTimer.Interval = [TimeSpan]::FromSeconds(1)
